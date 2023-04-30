@@ -1,3 +1,8 @@
+import pathlib
+import sys
+
+sys.path.append(pathlib.Path(__file__).parent.__str__())
+
 import re
 
 
@@ -70,9 +75,7 @@ def segment_by_word(sentence: str) -> list[tuple[str, str]]:
 
 
 if __name__ == "__main__":
-    with open(
-        r"C:\Users\reedl\OneDrive\Documents\info_retrieval\sherlock_complete_texts.txt"
-    ) as file:
+    with open(r"sherlock_complete_texts.txt", "r", encoding="utf-8") as file:
         text = file.read()
     text = preprocess_text(text)
     sentences = segment_by_sentence(text)
