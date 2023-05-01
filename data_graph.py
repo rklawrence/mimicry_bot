@@ -1,9 +1,28 @@
 from neo4j import GraphDatabase
 import logging
 from neo4j.exceptions import ServiceUnavailable
+import text_segmentation as ts
+import tqdm
+import random
+
+
+def weighted_word_choice(results: list, use_weights: bool = True) -> str:
+    """Processes a list of results from the word database, and chooses one of
+    the words randomly with respect to the weights if use_weights is True
+
+    Args:
+        results (list):
+            The results from a query to the graph db
+        use_weights (bool):
+            If True, the randomly chosen word will be based off of the weights
+            represented in the connectors.
+
+    Returns:
+        str: The randomly chosen word.
+    """
+
 
 class App:
-
     def __init__(self, uri, user, password):
         self.driver = GraphDatabase.driver(uri, auth=(user, password))
 
@@ -11,57 +30,90 @@ class App:
         # Don't forget to close the driver connection when you are finished with it
         self.driver.close()
 
-    def create_friendship(self, person1_name, person2_name):
-        with self.driver.session(database="neo4j") as session:
-            # Write transactions allow the driver to handle retries and transient errors
-            result = session.execute_write(
-                self._create_and_return_friendship, person1_name, person2_name)
-            for row in result:
-                print("Created friendship between: {p1}, {p2}".format(p1=row['p1'], p2=row['p2']))
+    def associate_words(self, word1, word2, author):
+        with self.driver.session() as session:
+            result = session.execute_write(self._create_follow, word1, word2, author)
+        return result
 
     @staticmethod
-    def _create_and_return_friendship(tx, person1_name, person2_name):
-        # To learn more about the Cypher syntax, see https://neo4j.com/docs/cypher-manual/current/
-        # The Reference Card is also a good resource for keywords https://neo4j.com/docs/cypher-refcard/current/
+    def _create_follow(tx, word1, word2, author):
         query = (
-            "CREATE (p1:Person { name: $person1_name }) "
-            "CREATE (p2:Person { name: $person2_name }) "
-            "CREATE (p1)-[:KNOWS]->(p2) "
-            "RETURN p1, p2"
+            f"MERGE (w1:Word {{text: '{word1}', author: '{author}'}})"
+            f"MERGE (w2:Word {{text: '{word2}', author: '{author}'}})"
+            f"MERGE (w1)-[r:FOLLOWS]-(w2) "
+            f"ON MATCH SET r.count = r.count + 1 "
+            f"ON CREATE SET r.count = 1 "
+            f"RETURN w1, r, w2 "
         )
-        result = tx.run(query, person1_name=person1_name, person2_name=person2_name)
-        try:
-            return [{"p1": row["p1"]["name"], "p2": row["p2"]["name"]}
-                    for row in result]
-        # Capture any errors along with the query and data for traceability
-        except ServiceUnavailable as exception:
-            logging.error("{query} raised an error: \n {exception}".format(
-                query=query, exception=exception))
-            raise
-
-    def find_person(self, person_name):
-        with self.driver.session(database="neo4j") as session:
-            result = session.execute_read(self._find_and_return_person, person_name)
-            for row in result:
-                print("Found person: {row}".format(row=row))
+        result = tx.run(query)
+        return list(result)
 
     @staticmethod
-    def _find_and_return_person(tx, person_name):
+    def _get_next_word(tx, word, num_words, author, use_weights=True):
         query = (
-            "MATCH (p:Person) "
-            "WHERE p.name = $person_name "
-            "RETURN p.name AS name"
+            f"MATCH"
+            f"(s:Word{{text:'{word}', author: '{author}'}})-"
+            f"[r:FOLLOWS]-"
+            f"(w:Word)"
+            f"MATCH (e:Word{{text: '<end>'}})"
+            f"WHERE EXISTS("
+            f"(w)-[*{num_words}]-(e:Word{{text: '<end>', author: '{author}'}})"
+            f")"
+            f"RETURN r, w"
         )
-        result = tx.run(query, person_name=person_name)
-        return [row["name"] for row in result]
+        result = tx.run(query)
+        # process results and get a weighted random choice based on r
+        word = weighted_word_choice(result, use_weights)
+
+        return word
+
+    def generate_sentence(self, length, author):
+        current_word = "<start>"
+        sentence = ""
+        with self.driver.session() as session:
+            for i in range(length):
+                sentence += session.execute_read(
+                    self._get_next_word,
+                    current_word,
+                    length - i,
+                    author,
+                    current_word == "<start>",
+                )
+        return sentence
+
+
+def populate_graphs(app):
+    with open(r"george_eliot.txt", "r", encoding="utf-8") as file:
+        text = file.read()
+    text = ts.preprocess_text(text)
+    sentences = ts.segment_by_sentence(text)
+    for index, sentence in enumerate(sentences):
+        if index >= 3000:
+            break
+        print(index)
+        words = ts.segment_by_word(sentence)
+        for bigram in words:
+            word1, word2 = bigram
+            app.associate_words(word1, word2, "George Eliot")
+    with open(r"sherlock_complete_texts.txt", "r", encoding="utf-8") as file:
+        text = file.read()
+    text = ts.preprocess_text(text)
+    sentences = ts.segment_by_sentence(text)
+    for index, sentence in enumerate(sentences):
+        if index >= 3000:
+            break
+        print(index)
+        words = ts.segment_by_word(sentence)
+        for bigram in words:
+            word1, word2 = bigram
+            app.associate_words(word1, word2, "George Eliot")
 
 
 if __name__ == "__main__":
     # Aura queries use an encrypted connection using the "neo4j+s" URI scheme
-    uri = "neo4j+s://d2165842.databases.neo4j.io"
+    uri = "bolt://localhost:7687"
     user = "neo4j"
-    password = "fPuJ0IkSNRN_a0e02976yn3FqT54cRRxRs9LEb8j4jo"
+    password = "plagiarism"
     app = App(uri, user, password)
-    app.create_friendship("Alice", "David")
-    app.find_person("Alice")
+
     app.close()
