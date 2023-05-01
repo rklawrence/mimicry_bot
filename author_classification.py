@@ -80,7 +80,7 @@ def train_model(
     attention_masks: list[list[int]],
     labels: list[int],
     batch_size: int = 32,
-    epochs: int = 4,
+    epochs: int = 6,
 ):
     """Trains a binary classification model based on the inputs.
 
@@ -151,7 +151,9 @@ def train_model(
         print(f"Starting epoch: {epoch}")
         total_loss = 0
         model.train()
+        print(len(train_dataloader))
         for step, batch in enumerate(train_dataloader):
+            print(step)
             b_input_ids = batch[0].to(device)
             b_input_mask = batch[1].to(device)
             b_labels = batch[2].to(device)
@@ -233,7 +235,9 @@ def model_creation_pipeline():
     text = ts.preprocess_text(text)
     doyle_sentences_raw = ts.segment_by_sentence(text)
     doyle_sentences = list()
-    for sentence in doyle_sentences_raw:
+    for index, sentence in enumerate(doyle_sentences_raw):
+        if index > 3000:
+            break
         sentence = preprocess_sentence(sentence)
         doyle_sentences.append(sentence)
 
@@ -242,7 +246,9 @@ def model_creation_pipeline():
     text = ts.preprocess_text(text)
     eliot_sentences_raw = ts.segment_by_sentence(text)
     eliot_sentences = list()
-    for sentence in eliot_sentences_raw:
+    for index, sentence in enumerate(eliot_sentences_raw):
+        if index > 3000:
+            break
         sentence = preprocess_sentence(sentence)
         eliot_sentences.append(sentence)
 
@@ -264,12 +270,12 @@ def model_creation_pipeline():
     with open("model.p", "wb+") as file:
         pickle.dump(model, file)
 
-    model
+    return model
 
 
 if __name__ == "__main__":
-    # model_creation_pipeline()
-    with open("model.p", "rb") as file:
-        model = pickle.load(file)
-    test_sentence = "In every varied posture, place, and hour,How widow'd every thought of every joy!"
+    model = model_creation_pipeline()
+    # with open("model.p", "rb") as file:
+    #     model = pickle.load(file)
+    test_sentence = "And finds all desert now"
     print(classify_text(model, test_sentence))

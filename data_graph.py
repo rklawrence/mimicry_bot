@@ -20,6 +20,17 @@ def weighted_word_choice(results: list, use_weights: bool = True) -> str:
     Returns:
         str: The randomly chosen word.
     """
+    print(use_weights)
+    words = list()
+    weights = list()
+    for result in results:
+        weights.append(result.get("count"))
+        words.append(result.get("text"))
+    if use_weights:
+        word = random.choices(words, weights=weights, k=1)[0]
+    else:
+        word = random.choice(words)
+    return word
 
 
 class App:
@@ -59,11 +70,11 @@ class App:
             f"WHERE EXISTS("
             f"(w)-[*{num_words}]-(e:Word{{text: '<end>', author: '{author}'}})"
             f")"
-            f"RETURN r, w"
+            f"RETURN r.count as count, w.text as text"
         )
         result = tx.run(query)
         # process results and get a weighted random choice based on r
-        word = weighted_word_choice(result, use_weights)
+        word = weighted_word_choice(list(result), use_weights)
 
         return word
 
@@ -72,13 +83,16 @@ class App:
         sentence = ""
         with self.driver.session() as session:
             for i in range(length):
-                sentence += session.execute_read(
+                word = session.execute_read(
                     self._get_next_word,
                     current_word,
                     length - i,
                     author,
-                    current_word == "<start>",
+                    current_word != "<start>",
                 )
+                sentence += word + " "
+                current_word = word
+        sentence = sentence.strip() + "."
         return sentence
 
 
@@ -115,5 +129,6 @@ if __name__ == "__main__":
     user = "neo4j"
     password = "plagiarism"
     app = App(uri, user, password)
-
+    sentence = app.generate_sentence(10, "George Eliot")
+    print(sentence)
     app.close()
