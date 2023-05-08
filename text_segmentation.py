@@ -17,7 +17,8 @@ def preprocess_text(text: str) -> str:
     Returns:
         str: The text after being processed.
     """
-    text = re.sub(r"[\",;\-\&/:'\(\)]+", "", text)
+    text = re.sub(r"[\";\-\&/:'\(\),\[\]]+", "", text)
+    text = re.sub(r"[1-9]", "", text)
     text = text.lower()
     text = re.sub(r"\s+", " ", text)
     return text
@@ -43,7 +44,7 @@ def segment_by_sentence(text: str) -> list[str]:
     for location in punctuation_location:
         sentence = text[previous_index:location].strip()
         previous_index = location + 1
-        if len(sentence.split(" ")) == 1:
+        if len(sentence.split(" ")) <= 2:
             continue
         sentences.append(sentence)
     return sentences
@@ -79,6 +80,7 @@ if __name__ == "__main__":
         text = file.read()
     text = preprocess_text(text)
     sentences = segment_by_sentence(text)
+    print(len(sentences))
     sentence = sentences[8]
     print(sentence)
     print(segment_by_word(sentence))

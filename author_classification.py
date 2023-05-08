@@ -16,14 +16,15 @@ import torch.utils.data as data
 import transformers
 from keras.utils import pad_sequences
 from sklearn.model_selection import train_test_split
-
+import tqdm
+from nltk.corpus import stopwords
 import text_segmentation as ts
 
 MAX_LENGTH = 128
-CLASSES = {0: "Arthur Conan Doyle", 1: "George Eliot"}
+CLASSES = {0: "Arthur Conan Doyle", 1: "William Shakespeare"}
 
 
-def preprocess_sentence(sentence: list[str]) -> list[str]:
+def preprocess_sentence(sentence: str) -> str:
     """Preprocesses the sentence to ensure the highest accuracy possible when
     it is used with the classfication model.
 
@@ -33,8 +34,10 @@ def preprocess_sentence(sentence: list[str]) -> list[str]:
     Returns:
         list[str]: The sentence after it has been preprocessed.
     """
-    # stop_words = set(stopwords.words("english"))
-    # return [w for w in sentence if w not in stop_words]
+    stop_words = set(stopwords.words("english"))
+    words = sentence.split(" ")
+    sentence = [w for w in words if w not in stop_words]
+    sentence = " ".join(sentence)
     return sentence
 
 
@@ -80,7 +83,7 @@ def train_model(
     attention_masks: list[list[int]],
     labels: list[int],
     batch_size: int = 32,
-    epochs: int = 6,
+    epochs: int = 4,
 ):
     """Trains a binary classification model based on the inputs.
 
@@ -141,7 +144,7 @@ def train_model(
 
     device = torch.device("cuda")
     total_steps = len(train_dataloader) * epochs
-    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5, eps=1e-8)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5, eps=1e-8)
     scheduler = transformers.get_linear_schedule_with_warmup(
         optimizer, num_warmup_steps=0, num_training_steps=total_steps
     )
@@ -152,27 +155,30 @@ def train_model(
         total_loss = 0
         model.train()
         print(len(train_dataloader))
-        for step, batch in enumerate(train_dataloader):
-            print(step)
-            b_input_ids = batch[0].to(device)
-            b_input_mask = batch[1].to(device)
-            b_labels = batch[2].to(device)
+        for batch in tqdm.tqdm(train_dataloader):
+            try:
+                # print(step)
+                b_input_ids = batch[0].to(device)
+                b_input_mask = batch[1].to(device)
+                b_labels = batch[2].to(device)
 
-            model.zero_grad()
+                model.zero_grad()
 
-            outputs = model(
-                b_input_ids,
-                token_type_ids=None,
-                attention_mask=b_input_mask,
-                labels=b_labels,
-            )
+                outputs = model(
+                    b_input_ids,
+                    token_type_ids=None,
+                    attention_mask=b_input_mask,
+                    labels=b_labels,
+                )
 
-            loss = outputs[0]
-            total_loss += loss.item()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
+                loss = outputs[0]
+                total_loss += loss.item()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                scheduler.step()
+            except Exception:
+                continue
 
         avg_train_loss = total_loss / len(train_dataloader)
         print(avg_train_loss)
@@ -184,18 +190,21 @@ def train_model(
 
         # Evaluate data for one epoch
         for batch in validation_dataloader:
-            batch = tuple(t.to(device) for t in batch)
-            b_input_ids, b_input_mask, b_labels = batch
-            with torch.no_grad():
-                outputs = model(
-                    b_input_ids, token_type_ids=None, attention_mask=b_input_mask
-                )
-            logits = outputs[0]
-            logits = logits.detach().cpu().numpy()
-            label_ids = b_labels.to("cpu").numpy()
-            tmp_eval_accuracy = flat_accuracy(logits, label_ids)
-            eval_accuracy += tmp_eval_accuracy
-            nb_eval_steps += 1
+            try:
+                batch = tuple(t.to(device) for t in batch)
+                b_input_ids, b_input_mask, b_labels = batch
+                with torch.no_grad():
+                    outputs = model(
+                        b_input_ids, token_type_ids=None, attention_mask=b_input_mask
+                    )
+                logits = outputs[0]
+                logits = logits.detach().cpu().numpy()
+                label_ids = b_labels.to("cpu").numpy()
+                tmp_eval_accuracy = flat_accuracy(logits, label_ids)
+                eval_accuracy += tmp_eval_accuracy
+                nb_eval_steps += 1
+            except Exception:
+                continue
         print("  Accuracy: {0:.2f}".format(eval_accuracy / nb_eval_steps))
 
     return model
@@ -217,10 +226,12 @@ def classify_text(model: transformers.BertPreTrainedModel, text: str) -> str:
             The label associated with the classification in the model.
     """
     model.eval()
+    model.to(torch.device("cpu"))
+    text = preprocess_sentence(text)
     text = ts.preprocess_text(text)
     words = ts.segment_by_word(text)
     tokens, attention_mask = tokenize_sentences(words)
-    device = torch.device("cuda")
+    device = torch.device("cpu")
     tokens = torch.tensor(tokens).to(device)
     attention_mask = torch.tensor(attention_mask).to(device)
     output = model(tokens, token_type_ids=None, attention_mask=attention_mask)
@@ -236,18 +247,18 @@ def model_creation_pipeline():
     doyle_sentences_raw = ts.segment_by_sentence(text)
     doyle_sentences = list()
     for index, sentence in enumerate(doyle_sentences_raw):
-        if index > 3000:
+        if index > 16000:
             break
         sentence = preprocess_sentence(sentence)
         doyle_sentences.append(sentence)
 
-    with open(r"george_eliot.txt", encoding="utf-8") as file:
+    with open(r"shakespeare.txt", encoding="utf-8") as file:
         text = file.read()
     text = ts.preprocess_text(text)
     eliot_sentences_raw = ts.segment_by_sentence(text)
     eliot_sentences = list()
     for index, sentence in enumerate(eliot_sentences_raw):
-        if index > 3000:
+        if index > 16000:
             break
         sentence = preprocess_sentence(sentence)
         eliot_sentences.append(sentence)
@@ -274,8 +285,46 @@ def model_creation_pipeline():
 
 
 if __name__ == "__main__":
-    model = model_creation_pipeline()
-    # with open("model.p", "rb") as file:
-    #     model = pickle.load(file)
-    test_sentence = "And finds all desert now"
-    print(classify_text(model, test_sentence))
+    torch.cuda.empty_cache()
+    # model = model_creation_pipeline()
+    with open("model.p", "rb") as file:
+        model = pickle.load(file)
+    # test_sentence = "And finds all desert now"
+    # sentences = [
+    #     "When in disgrace with Fortune and men's eyes",
+    #     "it is not the first we have shared",
+    # ]
+    # with open(r"shakespeare.txt", encoding="utf-8") as file:
+    #     text = file.read()
+    #     text = ts.preprocess_text(text)
+    # sentences = ts.segment_by_sentence(text)
+    sentences = [
+        "posted today had hardly he answered turning white swirl of.",
+        "to that there were traced her mother had been drebber.",
+        "catherine cusack who has cruelly wronged by the month by.",
+        "innumerable quack nostrums some days at the two twinkled like.",
+        "whom he had been strong for it may not walk.",
+        "snapping away from day and illuminated than i wish to.",
+        "lal chowdar who had the hint from the carriage said.",
+        "philippe de soie with the steps in was silent gorges.",
+        "send an heiress to be able to seek the agra.",
+        "kiss it up your best of mountain wells are no.",
+        "just possible combination of jonathan small threw off down on.",
+        "put on horseback my face the modern said never see.",
+        "peace seemed a true that a bad day and with.",
+        "square and there were holding the monument which had no.",
+        "supposing anyone who he said our turn the empty on.",
+        "living the weather and only mean bodies or a lot.",
+        "sholtos death and the doorway laughing but who is easy.",
+        "sold out of events leading us have coursed many times.",
+        "poison is in his lips i glanced with my ring.",
+        "sally out dark enough to his absencea disaster had not.",
+    ]
+    # for sentence in sentences:
+    #     print(sentence)
+    correct = 0
+    for sentence in tqdm.tqdm(sentences):
+        author = classify_text(model, sentence)
+        if author == "Arthur Conan Doyle":
+            correct += 1
+    print(float(correct) / float(len(sentences)))
