@@ -120,7 +120,7 @@ if __name__ == "__main__":
     ]
     doyle_graph_average_time = (time() - start_time) / NUM_SENTENCES
     doyle_graph_accuracy = determine_accuracy(
-        "Arthur Conan Doyle", doyle_gram_sentences, model
+        "Arthur Conan Doyle", doyle_graph_sentences, model
     )
     print_results(
         "graph", "Arthur Conan Doyle", doyle_graph_average_time, doyle_graph_accuracy
@@ -134,7 +134,7 @@ if __name__ == "__main__":
     ]
     shakespeare_graph_average_time = (time() - start_time) / NUM_SENTENCES
     shakespeare_graph_accuracy = determine_accuracy(
-        "William Shakespeare", shakespeare_gram_sentences, model
+        "William Shakespeare", shakespeare_graph_sentences, model
     )
     print_results(
         "graph",
